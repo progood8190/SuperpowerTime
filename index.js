@@ -23,7 +23,7 @@
   var activatedAt = 0;
   var decimals = 2, visible = true;
   var rafId = 0, lastText = '';
-  var ro = null, sized = false, anchored = true, sizeTick = 0;
+  var ro = null, sized = false, anchored = true, sizeTick = 0, tookPosition = false;
   var msgPatched = false, origDesc = null, seen = null;
   var wrappedSelect = null, origSelect = null;
 
@@ -150,6 +150,24 @@
     return sel;
   }
 
+  function ensureAnchor() {
+    var cs = window.getComputedStyle(el.fuel);
+    if (cs.position !== 'static') return true;
+    var probe = el.bar || el.label;
+    var before = probe && probe.getBoundingClientRect ? probe.getBoundingClientRect() : null;
+    el.fuel.style.position = 'relative';
+    tookPosition = true;
+    if (before) {
+      var after = probe.getBoundingClientRect();
+      if (Math.abs(after.left - before.left) > 0.5 || Math.abs(after.top - before.top) > 0.5) {
+        el.fuel.style.position = '';
+        tookPosition = false;
+        return false;
+      }
+    }
+    return true;
+  }
+
   function grab() {
     if (!el.fuel || !document.body.contains(el.fuel)) {
       el.fuel  = document.getElementById('superpower-fuel');
@@ -160,22 +178,25 @@
     }
     if (!el.fuel) return false;
     if (!el.out || !el.fuel.contains(el.out)) {
-      anchored = window.getComputedStyle(el.fuel).position !== 'static';
+      anchored = ensureAnchor();
       el.out = document.createElement('div');
       el.out.id = 'defly-super-countdown';
-      el.out.style.cssText = (anchored
-          ? 'position:absolute;top:50%;transform:translateY(-50%);'
-          : 'position:relative;float:right;')
-        + [
-          'font-weight:700',
-          'font-family:"Segoe UI",system-ui,sans-serif',
-          'line-height:1',
-          'color:#fff',
-          'text-shadow:0 1px 2px rgba(0,0,0,.75)',
-          'pointer-events:none',
-          'letter-spacing:.02em',
-          'font-variant-numeric:tabular-nums'
-        ].join(';');
+      el.out.style.cssText = [
+        anchored ? 'position:absolute' : 'position:fixed',
+        'top:50%',
+        'transform:translateY(-50%)',
+        'pointer-events:none',
+        'max-width:92%',
+        'overflow:hidden',
+        'white-space:nowrap',
+        'font-weight:700',
+        'font-family:"Segoe UI",system-ui,sans-serif',
+        'line-height:1',
+        'color:#fff',
+        'text-shadow:0 1px 2px rgba(0,0,0,.75)',
+        'letter-spacing:.02em',
+        'font-variant-numeric:tabular-nums'
+      ].join(';');
       matchLayer();
       el.fuel.appendChild(el.out);
       lastText = '';
@@ -211,12 +232,21 @@
     var h = el.fuel.clientHeight || 0;
     if (!h) return;
     sized = true;
-    var fs = Math.max(8, Math.round(h * 0.62));
+    var fs = Math.max(8, Math.min(Math.round(h * 0.62), h - 2));
     var pad = Math.max(3, Math.round(h * 0.3));
     if (el.out.style.fontSize !== fs + 'px') el.out.style.fontSize = fs + 'px';
-    var edge = pad + 'px';
-    if (anchored) { if (el.out.style.right !== edge) el.out.style.right = edge; }
-    else if (el.out.style.marginRight !== edge) el.out.style.marginRight = edge;
+    if (anchored) {
+      var edge = pad + 'px';
+      if (el.out.style.right !== edge) el.out.style.right = edge;
+    } else {
+      var r = el.fuel.getBoundingClientRect();
+      var L = Math.round(r.right - pad), Tp = Math.round(r.top + r.height / 2);
+      if (el.out.style.left !== L + 'px') el.out.style.left = L + 'px';
+      if (el.out.style.top !== Tp + 'px') el.out.style.top = Tp + 'px';
+      if (el.out.style.transform !== 'translate(-100%,-50%)') {
+        el.out.style.transform = 'translate(-100%,-50%)';
+      }
+    }
   }
 
   function applyOpacity() {
@@ -280,6 +310,21 @@
       if (console.table) console.table(rows); else console.log(rows);
       return { active: USE.slice(), recharge: CD.slice(), fromServer: haveTables };
     },
+    contained: function () {
+      var ok = { childOfBar: false, noPointerEvents: false, insideBarBox: false, affectsLayout: true };
+      if (!el.fuel || !el.out) { console.log('[super-timer] readout not built yet'); return ok; }
+      ok.childOfBar = (el.out.parentNode === el.fuel);
+      ok.noPointerEvents = /pointer-events:\s*none/.test(el.out.style.cssText);
+      ok.affectsLayout = !/position:\s*(absolute|fixed)/.test(el.out.style.cssText);
+      try {
+        var b = el.fuel.getBoundingClientRect(), o = el.out.getBoundingClientRect();
+        ok.insideBarBox = (o.left >= b.left - 1 && o.right <= b.right + 1 &&
+                           o.top >= b.top - 1 && o.bottom <= b.bottom + 1);
+      } catch (e) {}
+      if (console.table) console.table([ok]); else console.log(ok);
+      return ok;
+    },
+
     status: function () {
       var i = power();
       console.log('[super-timer] packets:', msgPatched ? 'hooked' : 'NOT hooked',
@@ -294,6 +339,8 @@
       if (rafId) cancelAnimationFrame(rafId);
       rafId = 0;
       stopObserving();
+      if (tookPosition && el.fuel) { try { el.fuel.style.position = ''; } catch (e) {} }
+      tookPosition = false;
       unpatchMessageEvent();
       unpatchSelect();
       if (el.out) {
