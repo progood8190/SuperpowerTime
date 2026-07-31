@@ -23,6 +23,7 @@
   var activatedAt = 0;
   var decimals = 2, visible = true;
   var rafId = 0, lastText = '';
+  var ro = null, sized = false, anchored = true, sizeTick = 0;
   var msgPatched = false, origDesc = null, seen = null;
   var wrappedSelect = null, origSelect = null;
 
@@ -155,25 +156,67 @@
       el.bar   = document.getElementById('superpower-fuel-value');
       el.label = document.getElementById('superpower-label');
       el.out   = null;
+      stopObserving();
     }
     if (!el.fuel) return false;
     if (!el.out || !el.fuel.contains(el.out)) {
-      var cs = window.getComputedStyle(el.fuel);
-      if (cs.position === 'static') el.fuel.style.position = 'relative';
+      anchored = window.getComputedStyle(el.fuel).position !== 'static';
       el.out = document.createElement('div');
       el.out.id = 'defly-super-countdown';
-      el.out.style.cssText = [
-        'position:absolute', 'right:6px', 'top:50%',
-        'transform:translateY(-50%)',
-        'font:700 12px/1 "Segoe UI",system-ui,sans-serif',
-        'color:#fff', 'text-shadow:0 1px 2px rgba(0,0,0,.75)',
-        'pointer-events:none', 'z-index:5', 'letter-spacing:.02em',
-        'font-variant-numeric:tabular-nums'
-      ].join(';');
+      el.out.style.cssText = (anchored
+          ? 'position:absolute;top:50%;transform:translateY(-50%);'
+          : 'position:relative;float:right;')
+        + [
+          'font-weight:700',
+          'font-family:"Segoe UI",system-ui,sans-serif',
+          'line-height:1',
+          'color:#fff',
+          'text-shadow:0 1px 2px rgba(0,0,0,.75)',
+          'pointer-events:none',
+          'letter-spacing:.02em',
+          'font-variant-numeric:tabular-nums'
+        ].join(';');
+      matchLayer();
       el.fuel.appendChild(el.out);
       lastText = '';
+      sized = false;
+      startObserving();
     }
+    if (!sized || (!ro && ++sizeTick % 30 === 0)) syncSize();
     return true;
+  }
+
+  function matchLayer() {
+    if (!el.bar || !el.out) return;
+    var z = window.getComputedStyle(el.bar).zIndex;
+    if (z && z !== 'auto' && isFinite(+z)) el.out.style.zIndex = String(+z);
+  }
+
+  function startObserving() {
+    if (ro || typeof ResizeObserver === 'undefined' || !el.fuel) return;
+    try {
+      ro = new ResizeObserver(function () { sized = false; });
+      ro.observe(el.fuel);
+    } catch (e) { ro = null; }
+  }
+
+  function stopObserving() {
+    if (!ro) return;
+    try { ro.disconnect(); } catch (e) {}
+    ro = null;
+  }
+
+  function syncSize() {
+    if (!el.fuel || !el.out) return;
+    var h = el.fuel.clientHeight || 0;
+    if (!h) return;
+    sized = true;
+    var fs = Math.max(8, Math.round(h * 0.62));
+    var pad = Math.max(3, Math.round(h * 0.3));
+    if (el.out.style.fontSize !== fs + 'px') el.out.style.fontSize = fs + 'px';
+    var edge = pad + 'px';
+    if (anchored) { if (el.out.style.right !== edge) el.out.style.right = edge; }
+    else if (el.out.style.marginRight !== edge) el.out.style.marginRight = edge;
   }
 
   function applyOpacity() {
@@ -250,6 +293,7 @@
     destroy: function () {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = 0;
+      stopObserving();
       unpatchMessageEvent();
       unpatchSelect();
       if (el.out) {
