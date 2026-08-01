@@ -16,7 +16,7 @@
   var haveTables = false;
 
   var el = { fuel: null, bar: null, label: null, out: null };
-  var sel = -1;
+  var sel = -1, lastLabel = null;
   var fuel = -1;
   var active = false;
   var fuelAt = 0;
@@ -25,7 +25,6 @@
   var rafId = 0, lastText = '';
   var ro = null, sized = false, sizeTick = 0, syncing = false;
   var msgPatched = false, origDesc = null, seen = null;
-  var wrappedSelect = null, origSelect = null;
 
   function now() {
     return (typeof performance !== 'undefined' && performance.now)
@@ -56,7 +55,7 @@
 
     if (op === OP_WELCOME) {
       if (len < 65) return;
-      active = false; fuel = -1; sel = -1;
+      active = false; fuel = -1; sel = -1; lastLabel = null;
       readTables(dv, len);
       return;
     }
@@ -109,32 +108,7 @@
     msgPatched = false;
   }
 
-  function patchSelect() {
-    try {
-      var d = window.defly;
-      if (!d || typeof d.selectSuperpower !== 'function') return false;
-      if (d.selectSuperpower === wrappedSelect) return true;
-      origSelect = d.selectSuperpower;
-      wrappedSelect = function (i) {
-        sel = i | 0; fuel = 0; active = false; fuelAt = now();
-        return origSelect.apply(this, arguments);
-      };
-      d.selectSuperpower = wrappedSelect;
-      return true;
-    } catch (e) { return false; }
-  }
-
-  function unpatchSelect() {
-    try {
-      if (window.defly && origSelect && window.defly.selectSuperpower === wrappedSelect) {
-        window.defly.selectSuperpower = origSelect;
-      }
-    } catch (e) {}
-    wrappedSelect = null; origSelect = null;
-  }
-
-  function selFromLabel() {
-    var t = (el.label && el.label.textContent || '').trim();
+  function selFromLabel(t) {
     if (!t) return -1;
     var name = null;
     if (/^Recharging\s+/.test(t)) name = t.replace(/^Recharging\s+/, '').replace(/\.+$/, '').trim();
@@ -144,9 +118,10 @@
   }
 
   function power() {
-    if (sel >= 0) return sel;
-    var i = selFromLabel();
-    if (i >= 0) sel = i;
+    var t = (el.label && el.label.textContent || '').trim();
+    if (t === lastLabel) return sel;
+    lastLabel = t;
+    sel = selFromLabel(t);
     return sel;
   }
 
@@ -257,7 +232,6 @@
 
   function frame() {
     rafId = requestAnimationFrame(frame);
-    patchSelect();
     if (!grab()) return;
 
     if (!visible || el.fuel.style.display === 'none') { write(''); return; }
@@ -316,7 +290,6 @@
       rafId = 0;
       stopObserving();
       unpatchMessageEvent();
-      unpatchSelect();
       if (el.out) {
         if (typeof el.out.remove === 'function') el.out.remove();
         else if (el.out.parentNode) el.out.parentNode.removeChild(el.out);
@@ -335,7 +308,6 @@
 
   window.DeflySuperTimer = API;
   patchMessageEvent();
-  patchSelect();
   rafId = requestAnimationFrame(frame);
 
   console.log(
